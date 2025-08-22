@@ -47,27 +47,25 @@ app.get("/", (req, res) => {
 
 // Lootlab Complete Route
 app.get("/lootlab-complete", (req, res) => {
-  const token = generateToken();
-  validTokens.add(token);
+  const { userId, signature } = req.query;
 
+  // TODO: verify signature with Lootlabs API/documentation
+  const isValid = verifyLootlabsCompletion(userId, signature);
+
+  if (!isValid) {
+    return res.status(403).send("❌ You must complete Lootlabs offer first");
+  }
+
+  const token = generateToken();
   res.send(`
     <html>
-      <head>
-        <style>
-          body { font-family: Arial; background:#1e1e1e; color:#e0e0e0; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
-          .card { background:#2a2a2a; padding:30px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.4); text-align:center; }
-          a { color:#4dabf7; font-size:18px; }
-        </style>
-      </head>
       <body>
-        <div class="card">
-          <h2>✅ Lootlab Complete</h2>
-          <p><a href="/getKey?token=${token}">Reveal Your Daily Key</a></p>
-        </div>
+        <p>✅ Token generated! <a href="/getKey?token=${token}">Reveal your key</a></p>
       </body>
     </html>
   `);
 });
+
 
 // Protected Key Route
 app.get("/getKey", (req, res) => {
