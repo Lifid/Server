@@ -15,7 +15,12 @@ function getDailyKey() {
 }
 
 function generateToken() {
-  return crypto.randomBytes(16).toString("hex");
+  const token = crypto.randomBytes(16).toString("hex");
+  validTokens.add(token);
+
+  // Auto-expire token after 10 seconds
+  setTimeout(() => validTokens.delete(token), 10000);
+  return token;
 }
 
 // Home Page
