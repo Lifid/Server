@@ -49,16 +49,11 @@ app.get("/", (req, res) => {
 
 // Lootlabs GET postback
 app.get("/lootlab-complete", (req, res) => {
-  const { puid, offer_id } = req.query;
+
+   const { puid } = req.query;
 
   if (!puid) {
     return res.status(400).send("Missing user ID (puid)");
-  }
-
-  // Optional: verify offer_id matches your locker
-  const MY_LOCKER_ID = "123"; // Replace with your actual locker ID if needed
-  if (offer_id && offer_id !== MY_LOCKER_ID) {
-    return res.status(403).send("Invalid offer ID");
   }
 
   // Generate one-time token
