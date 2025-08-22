@@ -3,71 +3,89 @@ const crypto = require("crypto");
 const fs = require("fs");
 
 const app = express();
-const PORT = process.env.PORT || 3000; // Use Render's assigned port
+const PORT = process.env.PORT || 3000;
 
-app.use(express.urlencoded({ extended: true }));
-
+// Store valid tokens
 const validTokens = new Set();
 
+// Load daily key
 function getDailyKey() {
   const data = fs.readFileSync("./dailykey.json", "utf8");
   return JSON.parse(data).key;
 }
 
+// Generate secure random token
 function generateToken() {
   const token = crypto.randomBytes(16).toString("hex");
   validTokens.add(token);
-
-  // Auto-expire token after 10 seconds
+  // Auto-expire after 10 seconds
   setTimeout(() => validTokens.delete(token), 10000);
   return token;
 }
 
-// Home Page
+// ==================== ROUTES ==================== //
+
+// Home page
 app.get("/", (req, res) => {
+  res.send(`
+  <html>
+    <head>
+      <style>
+        body { font-family: Arial; background:#1e1e1e; color:#e0e0e0; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+        .card { background:#2a2a2a; padding:30px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.4); text-align:center; }
+        a { color:#4dabf7; text-decoration:none; font-weight:bold; }
+        a:hover { text-decoration:underline; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>🔑 Key Server</h1>
+        <p>Complete a Lootlabs offer to get your key!</p>
+      </div>
+    </body>
+  </html>
+  `);
+});
+
+// Lootlabs GET postback
+app.get("/lootlab-complete", (req, res) => {
+  const { puid, offer_id } = req.query;
+
+  if (!puid) {
+    return res.status(400).send("Missing user ID (puid)");
+  }
+
+  // Optional: verify offer_id matches your locker
+  const MY_LOCKER_ID = "123"; // Replace with your actual locker ID if needed
+  if (offer_id && offer_id !== MY_LOCKER_ID) {
+    return res.status(403).send("Invalid offer ID");
+  }
+
+  // Generate one-time token
+  const token = generateToken();
+
+  // Send token page to user
   res.send(`
     <html>
       <head>
         <style>
           body { font-family: Arial; background:#1e1e1e; color:#e0e0e0; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
           .card { background:#2a2a2a; padding:30px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.4); text-align:center; }
-          a { color:#4dabf7; text-decoration:none; font-weight:bold; }
+          a { color:#4dabf7; font-size:18px; text-decoration:none; }
           a:hover { text-decoration:underline; }
         </style>
       </head>
       <body>
         <div class="card">
-          <h1>🔑 Key Server</h1>
-          <p><a href="/lootlab-complete">Start Lootlab Simulation</a></p>
+          <h2>✅ Lootlabs Completed</h2>
+          <p><a href="/getKey?token=${token}">Reveal Your Daily Key</a></p>
         </div>
       </body>
     </html>
   `);
 });
 
-// Lootlab Complete Route
-app.get("/lootlab-complete", (req, res) => {
-  const { userId, signature } = req.query;
-
-  // TODO: verify signature with Lootlabs API/documentation
-  const isValid = verifyLootlabsCompletion(userId, signature);
-
-  if (!isValid) {
-    return res.status(403).send("❌ You must complete Lootlabs offer first");
-  }
-
-  const token = generateToken();
-  res.send(`
-    <html>
-      <body>
-        <p>✅ Token generated! <a href="/getKey?token=${token}">Reveal your key</a></p>
-      </body>
-    </html>
-  `);
-});
-
-
-// Protected Key Route
+// Key page
 app.get("/getKey", (req, res) => {
   const { token } = req.query;
 
