@@ -1,0 +1,17 @@
+{
+  "name": "key-server",
+  "version": "1.0.0",
+  "description": "Lootlab daily key server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["lootlab", "key", "dailykey", "node"],
+  "author": "Your Name",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.1.0",
+    "crypto": "^1.0.1",
+    "fs": "0.0.1-security"
+  }
+}
