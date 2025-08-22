@@ -7,7 +7,7 @@
     "start": "node server.js"
   },
   "keywords": ["lootlab", "key", "dailykey", "node"],
-  "author": "Your Name",
+  "author": "Dabitob",
   "license": "ISC",
   "dependencies": {
     "express": "^5.1.0",
