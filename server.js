@@ -15,6 +15,11 @@ function getDailyKey() {
 // ===== In-memory store for puid completions =====
 const completions = new Map();
 
+// ===== Root redirect =====
+app.get("/", (req, res) => {
+  res.redirect("/key");
+});
+
 // ===== Home / Key page =====
 app.get("/key", (req, res) => {
   const puid = uuidv4();
