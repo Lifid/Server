@@ -10,8 +10,8 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cookieParser());
 
-// In-memory store for completed PUIDs with expiration timestamp
-const completedUsers = new Map();
+// In-memory store: puid -> { createdAt, expiresAt, completed }
+const sessions = new Map();
 
 // Load daily key
 function getDailyKey() {
@@ -22,56 +22,46 @@ function getDailyKey() {
 // ===== Landing / Get Key page =====
 app.get("/", (req, res) => {
   const puid = req.cookies.puid;
-  const expiry = completedUsers.get(puid);
+  const session = puid ? sessions.get(puid) : null;
   const now = Date.now();
 
-  if (puid && expiry) {
-    const elapsed = 180000 - (expiry - now); // how long since the PUID was created
-
-    // If minimum time (50s) hasn't passed, treat as early refresh
-    if (elapsed < 50000) {
-      completedUsers.delete(puid);
+  if (session) {
+    // Already expired
+    if (now > session.expiresAt) {
+      sessions.delete(puid);
       res.clearCookie("puid");
       return renderGetKeyPage(res);
-        console.log(`CLEARED CHEATER 1`);
     }
 
-    // If session is still valid and minimum time passed, show key
-    if (expiry > now) {
-      console.log(`SHOW KEY`);
-      return renderKeyPage(res);
+    // If LootLabs not completed yet, show get key
+    if (!session.completed) {
+      return renderGetKeyPage(res);
     }
 
-    // Expired session
-    completedUsers.delete(puid);
-    console.log(`EXPIRE`);
-    res.clearCookie("puid");
+    // If completed but <60s wait -> block/glitch prevention
+    if (now - session.createdAt < 60000) {
+      sessions.delete(puid);
+      res.clearCookie("puid");
+      return renderGetKeyPage(res);
+    }
+
+    // If completed AND waited long enough -> show key
+    return renderKeyPage(res);
   }
 
-  // Default: show Get Key button
+  // Default: show Get Key
   renderGetKeyPage(res);
 });
 
 // ===== Generate PUID and redirect to LootLabs =====
 app.get("/key", (req, res) => {
-  const existingPuid = req.cookies.puid;
-  const existingExpiry = completedUsers.get(existingPuid);
-
-  // If old PUID exists but less than 30s remaining, expire it
-  if (existingPuid && existingExpiry && existingExpiry - Date.now() > 150000) {
-    completedUsers.delete(existingPuid);
-    res.clearCookie("puid");
-  }
-
-  // Create new PUID and 3 minute expiration
   const puid = uuidv4();
-  const expiry = Date.now() + 180000; // 3 minutes
-  completedUsers.set(puid, expiry);
+  const createdAt = Date.now();
+  const expiresAt = createdAt + 180000; // 3 minutes
+  sessions.set(puid, { createdAt, expiresAt, completed: false });
 
-  // Set cookie
   res.cookie("puid", puid, { httpOnly: true, maxAge: 180000 });
 
-  // Redirect to LootLabs with user's unique PUID
   const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
   res.redirect(lootlabsUrl);
 });
@@ -79,19 +69,22 @@ app.get("/key", (req, res) => {
 // ===== Handle return from LootLabs =====
 app.get("/api/lootlabs", (req, res) => {
   const puid = req.cookies.puid;
+  const session = puid ? sessions.get(puid) : null;
 
-  if (!puid || !completedUsers.has(puid)) {
-    return res.redirect("/"); // redirect to Get Key page if missing/expired
+  if (!session) {
+    return res.redirect("/");
   }
 
-  // Reset expiration to 3 minutes from now (in case user delayed)
-  completedUsers.set(puid, Date.now() + 180000);
+  // Mark session as completed
+  session.completed = true;
 
-  // Stay on same page, show key dynamically
+  // Keep same expiry (3 min total from creation)
+  sessions.set(puid, session);
+
   res.redirect("/");
 });
 
-// ===== Helper functions =====
+// ===== Helpers =====
 function renderGetKeyPage(res) {
   res.send(`
     <html>
