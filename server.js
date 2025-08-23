@@ -1,107 +1,96 @@
 const express = require("express");
-const cookieParser = require("cookie-parser");
+const path = require("path");
 const app = express();
 
-app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
-
 const PORT = process.env.PORT || 3000;
+const DEBUG = true; // set to false in production
 
-// Debug flag
-const debugMode = true;
+// Memory store
+let users = {};
 
-// Store users by IP
-const users = {};
-
-// Utility: get client IP
-function getIp(req) {
+// Helper to get client IP
+function getClientIp(req) {
   return (
     req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.connection.remoteAddress ||
-    req.ip
+    req.connection?.remoteAddress ||
+    req.ip ||
+    null
   );
 }
 
-// Utility: generate fake key (replace with your system)
-function getDailyKey() {
-  return "KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-}
-
-// Main page (Get Key / Show Key)
+// Home page (get key)
 app.get("/", (req, res) => {
-  const ip = getIp(req);
+  const ip = getClientIp(req);
+
+  if (!ip) {
+    return res.send("<h3 style='color:red'>Error: Could not detect IP</h3>");
+  }
+
   const user = users[ip];
+  let message = "";
 
-  let debugMsg = "";
-
-  if (debugMode) {
-    if (!user) {
-      debugMsg = `<p style="color:green;">New user detected 01</p>`;
-    } else if (!user.completed && Date.now() - user.startTime < 45000) {
-      debugMsg = `<p style="color:red;">Loot lab not complete, try again</p>`;
+  if (!user) {
+    // brand new
+    users[ip] = { completed: false, startTime: Date.now(), expireTime: null };
+    if (DEBUG) message = "<p style='color:green'>New user detected 01</p>";
+  } else {
+    // check if expired
+    if (user.expireTime && Date.now() > user.expireTime) {
+      delete users[ip];
+      users[ip] = { completed: false, startTime: Date.now(), expireTime: null };
+      if (DEBUG) message = "<p style='color:green'>Session expired, new user reset</p>";
     }
   }
 
-  // If user has completed and not expired
-  if (user && user.completed && Date.now() < user.expireTime) {
-    const key = getDailyKey();
+  const current = users[ip];
 
-    // Clear IP so they must do it again next time
+  // glitch prevention: if they come back <45s after start
+  if (!current.completed && Date.now() - current.startTime < 45 * 1000) {
     delete users[ip];
-
-    res.send(`
-      <h1>Your Key</h1>
-      <p>${key}</p>
-      ${debugMsg}
-    `);
-  } else {
-    res.send(`
-      <h1>Get Key</h1>
-      <form action="/get-key" method="post">
-        <button type="submit">Get Key</button>
-      </form>
-      ${debugMsg}
-    `);
+    users[ip] = { completed: false, startTime: Date.now(), expireTime: null };
+    return res.send(
+      `<h3>Get Key Page</h3>
+       <p style="color:red">Loot lab not complete, try again</p>`
+    );
   }
-});
 
-// Handle "Get Key" button click → redirect to LootLabs
-app.post("/get-key", (req, res) => {
-  const ip = getIp(req);
+  // if completed + still valid
+  if (current.completed) {
+    const key = "YOUR_SECRET_KEY";
+    // clear their data once key is given
+    delete users[ip];
+    return res.send(`<h3>Your Key: ${key}</h3>${message}`);
+  }
 
-  // Reset old data if exists
-  users[ip] = {
-    startTime: Date.now(),
-    completed: false,
-    expireTime: null,
-  };
-
-  // Redirect to LootLabs with IP tracking
-  res.redirect(
-    `https://loot-link.com/s?BYbSlUsE&puid=${ip}`
+  // not yet completed
+  res.send(
+    `<h3>Get Key Page</h3>
+     <a href="https://loot-link.com/s?BYbSlUsE&puid=${ip}" target="_blank">Do LootLab</a>
+     ${message}`
   );
 });
 
 // Callback from LootLabs
 app.get("/api/lootlabs", (req, res) => {
-  const ip = req.query.ip;
+  const ip = getClientIp(req);
+
   if (!ip) {
-    return res.send("Missing IP");
+    return res.send("Missing IP (could not resolve client IP)");
   }
 
   const user = users[ip];
   if (!user) {
-    return res.send("Unknown user (no record)");
+    return res.send("Unknown user (no record for this IP)");
   }
 
-  // Mark as completed and set 3 min expiry
+  // mark as completed
   user.completed = true;
   user.expireTime = Date.now() + 3 * 60 * 1000;
 
   res.redirect("/");
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Static for testing
+app.use(express.static(path.join(__dirname, "public")));
+
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
