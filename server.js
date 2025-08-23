@@ -2,6 +2,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const fs = require("fs");
 const path = require("path");
+const cookieParser = require("cookie-parser");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,10 +21,24 @@ app.get("/", (req, res) => {
   res.redirect("/key");
 });
 
+
+app.use(cookieParser());
+
 // ===== Home / Key page =====
 app.get("/key", (req, res) => {
-  const puid = uuidv4();
-  completions.set(puid, false); // mark as not completed yet
+  let puid = req.cookies.puid;
+
+  // If they already have a puid and completed, go straight to redeem
+  if (puid && completions.get(puid)) {
+    return res.redirect(`/redeem?puid=${puid}`);
+  }
+
+  // Otherwise, generate new puid
+  puid = uuidv4();
+  completions.set(puid, false);
+
+  // Set cookie so we can track this player
+  res.cookie("puid", puid, { httpOnly: true });
 
   res.send(`
     <html>
