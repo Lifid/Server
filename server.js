@@ -38,8 +38,8 @@ app.get("/", (req, res) => {
       return renderGetKeyPage(res);
     }
 
-    // If completed but <60s wait -> block/glitch prevention
-    if (now - session.createdAt < 60000) {
+    // If completed but <47s wait -> block/glitch prevention
+    if (now - session.createdAt < 470000) {
       sessions.delete(puid);
       res.clearCookie("puid");
       return renderGetKeyPage(res);
