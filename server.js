@@ -33,15 +33,18 @@ app.get("/", (req, res) => {
       completedUsers.delete(puid);
       res.clearCookie("puid");
       return renderGetKeyPage(res);
+        console.log(`CLEARED CHEATER 1`);
     }
 
     // If session is still valid and minimum time passed, show key
     if (expiry > now) {
+      console.log(`SHOW KEY`);
       return renderKeyPage(res);
     }
 
     // Expired session
     completedUsers.delete(puid);
+    console.log(`EXPIRE`);
     res.clearCookie("puid");
   }
 
