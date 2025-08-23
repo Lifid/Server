@@ -10,41 +10,24 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cookieParser());
 
-// ===== Load daily key =====
+// In-memory store for completed PUIDs
+const completedUsers = new Set();
+
+// Load daily key
 function getDailyKey() {
   const data = fs.readFileSync(path.join(__dirname, "dailykey.json"), "utf8");
   return JSON.parse(data).key;
 }
 
-// ===== In-memory store for puid completions =====
-const completions = new Map();
-
-// ===== Root redirect =====
+// ===== Landing page =====
 app.get("/", (req, res) => {
-  res.redirect("/key");
-});
-
-// ===== Key page =====
-app.get("/key", (req, res) => {
-  let puid = req.cookies.puid;
-
-  if (puid && completions.get(puid)) {
-    // Already completed → show key
-    return res.redirect(`/redeem?puid=${puid}`);
-  }
-
-  // Otherwise generate new puid
-  puid = uuidv4();
-  completions.set(puid, false);
-  res.cookie("puid", puid, { httpOnly: true });
-
   res.send(`
     <html>
       <head>
         <title>Get Key</title>
         <style>
-          body { background:#1e1e1e; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; color:#e0e0e0; }
-          .card { background:#2a2a2a; padding:40px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.5); text-align:center; }
+          body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
+          .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
           h1 { color:#4dabf7; }
           button { padding:15px 30px; font-size:18px; border:none; border-radius:8px; background:#4dabf7; color:white; cursor:pointer; transition:0.3s; }
           button:hover { background:#339af0; }
@@ -53,9 +36,8 @@ app.get("/key", (req, res) => {
       <body>
         <div class="card">
           <h1>🔑 Get Daily Key</h1>
-          <p>Click the button below to complete LootLabs:</p>
-          <form action="/redirect-to-lootlabs" method="get">
-            <input type="hidden" name="puid" value="${puid}">
+          <p>Click below to complete LootLabs:</p>
+          <form action="/key" method="get">
             <button type="submit">Go to LootLabs</button>
           </form>
         </div>
@@ -64,78 +46,63 @@ app.get("/key", (req, res) => {
   `);
 });
 
-// ===== Redirect to LootLabs =====
-app.get("/redirect-to-lootlabs", (req, res) => {
-  const { puid } = req.query;
-  if (!puid || !completions.has(puid)) return res.status(400).send("Invalid puid");
+// ===== Generate PUID and redirect to LootLabs =====
+app.get("/key", (req, res) => {
+  const puid = uuidv4();
+  res.cookie("puid", puid, { httpOnly: true });
 
-  const lootlabsLink = `https://loot-link.com/s?eTuBnKHk&puid=${puid}`;
-  res.redirect(lootlabsLink);
+  // LootLabs link with puid
+  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
+  res.redirect(lootlabsUrl);
 });
 
-// ===== LootLabs postback =====
+// ===== Handle return from LootLabs =====
 app.get("/api/lootlabs", (req, res) => {
-  const { click_id, ip } = req.query;
-  if (!click_id) return res.status(400).send("Missing click_id");
+  const puid = req.cookies.puid;
 
-  if (completions.has(click_id)) {
-    completions.set(click_id, true);
-    console.log(`✅ LootLabs completed: ${click_id} (IP: ${ip || "unknown"})`);
-    res.send("OK");
-  } else {
-    console.log(`⚠️ Unknown click_id: ${click_id}`);
-    res.status(404).send("Unknown click_id");
+  if (!puid) {
+    return res.status(400).send("⚠️ No session found. Please go through the Get Key button first.");
   }
+
+  // Mark user as completed
+  completedUsers.add(puid);
+
+  // Redirect to success page
+  res.redirect("/success");
 });
 
-// ===== Redeem key =====
-app.get("/redeem", (req, res) => {
-  const { puid } = req.query;
-  if (!puid || !completions.has(puid)) return res.status(400).send("Invalid puid");
+// ===== Success page showing key =====
+app.get("/success", (req, res) => {
+  const puid = req.cookies.puid;
 
-  if (completions.get(puid)) {
+  if (puid && completedUsers.has(puid)) {
     const dailyKey = getDailyKey();
-
-    res.send(`
+    return res.send(`
       <html>
         <head>
           <title>Your Key</title>
           <style>
-            body { background:#1e1e1e; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; color:#e0e0e0; }
-            .card { background:#2a2a2a; padding:40px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.5); text-align:center; }
+            body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
+            .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
             h1 { color:#4dabf7; }
             .key { font-size:28px; color:#0f0; margin-top:20px; }
           </style>
         </head>
         <body>
           <div class="card">
-            <h1>🔑 Your Daily Key</h1>
+            <h1>🎉 Congrats!</h1>
+            <p>Your daily key is:</p>
             <p class="key">${dailyKey}</p>
           </div>
         </body>
       </html>
     `);
-  } else {
-    res.send(`
-      <html>
-        <head>
-          <title>Not Completed</title>
-          <style>
-            body { background:#1e1e1e; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; color:#ff6b6b; }
-            .card { background:#2a2a2a; padding:40px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.5); text-align:center; }
-            h1 { color:#ff6b6b; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>⚠️ Complete LootLabs First!</h1>
-          </div>
-        </body>
-      </html>
-    `);
   }
+
+  res.send("⚠️ Could not verify completion. Please go through the Get Key button again.");
 });
 
+// ===== Start server =====
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
