@@ -24,6 +24,11 @@ app.get("/", (req, res) => {
   const puid = req.cookies.puid;
   const expiry = completedUsers.get(puid);
 
+  // If PUID exists but is expired or missing, remove cookie
+  if (puid && (!expiry || expiry < Date.now())) {
+    res.clearCookie("puid");
+  }
+
   // Show key if user has a valid session
   if (puid && expiry && expiry > Date.now()) {
     const dailyKey = getDailyKey();
@@ -81,8 +86,9 @@ app.get("/key", (req, res) => {
   const existingExpiry = completedUsers.get(existingPuid);
 
   // If user already has a PUID and it's been less than 30 seconds, expire old one
-  if (existingPuid && existingExpiry && existingExpiry - Date.now() > 150000) { 
+  if (existingPuid && existingExpiry && existingExpiry - Date.now() > 150000) {
     completedUsers.delete(existingPuid);
+    res.clearCookie("puid");
   }
 
   // Create new PUID and 3 minute expiration
@@ -109,7 +115,8 @@ app.get("/api/lootlabs", (req, res) => {
   // Reset expiration to 3 minutes from now (in case user delayed)
   completedUsers.set(puid, Date.now() + 180000);
 
-  res.redirect("/"); // stay on same page, show key dynamically
+  // Stay on same page, show key dynamically
+  res.redirect("/");
 });
 
 // ===== Start server =====
