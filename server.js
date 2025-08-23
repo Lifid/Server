@@ -19,8 +19,37 @@ function getDailyKey() {
   return JSON.parse(data).key;
 }
 
-// ===== Landing page =====
+// ===== Landing / Get Key page =====
 app.get("/", (req, res) => {
+  const puid = req.cookies.puid;
+  const expiry = completedUsers.get(puid);
+  
+  if (puid && expiry && expiry > Date.now()) {
+    // User has completed LootLabs, show key
+    const dailyKey = getDailyKey();
+    return res.send(`
+      <html>
+        <head>
+          <title>Your Key</title>
+          <style>
+            body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
+            .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
+            h1 { color:#4dabf7; }
+            .key { font-size:28px; color:#0f0; margin-top:20px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>🎉 Congrats!</h1>
+            <p>Your daily key is:</p>
+            <p class="key">${dailyKey}</p>
+          </div>
+        </body>
+      </html>
+    `);
+  }
+
+  // User has not completed LootLabs, show the button
   res.send(`
     <html>
       <head>
@@ -45,6 +74,7 @@ app.get("/", (req, res) => {
     </html>
   `);
 });
+
 
 // ===== Generate PUID and redirect to LootLabs =====
 app.get("/key", (req, res) => {
