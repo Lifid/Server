@@ -1,11 +1,14 @@
 const express = require("express");
+const cookieParser = require("cookie-parser");
 const { v4: uuidv4 } = require("uuid");
 const fs = require("fs");
 const path = require("path");
-const cookieParser = require("cookie-parser");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cookieParser());
 
 // ===== Load daily key =====
 function getDailyKey() {
@@ -21,23 +24,18 @@ app.get("/", (req, res) => {
   res.redirect("/key");
 });
 
-
-app.use(cookieParser());
-
-// ===== Home / Key page =====
+// ===== Key page =====
 app.get("/key", (req, res) => {
   let puid = req.cookies.puid;
 
-  // If they already have a puid and completed, go straight to redeem
   if (puid && completions.get(puid)) {
+    // Already completed → show key
     return res.redirect(`/redeem?puid=${puid}`);
   }
 
-  // Otherwise, generate new puid
+  // Otherwise generate new puid
   puid = uuidv4();
   completions.set(puid, false);
-
-  // Set cookie so we can track this player
   res.cookie("puid", puid, { httpOnly: true });
 
   res.send(`
@@ -75,7 +73,7 @@ app.get("/redirect-to-lootlabs", (req, res) => {
   res.redirect(lootlabsLink);
 });
 
-// ===== LootLabs Postback =====
+// ===== LootLabs postback =====
 app.get("/api/lootlabs", (req, res) => {
   const { click_id, ip } = req.query;
   if (!click_id) return res.status(400).send("Missing click_id");
