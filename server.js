@@ -23,38 +23,73 @@ function getDailyKey() {
 app.get("/", (req, res) => {
   const puid = req.cookies.puid;
   const expiry = completedUsers.get(puid);
+  const now = Date.now();
 
-  // If PUID exists but is expired or missing, remove cookie
-  if (puid && (!expiry || expiry < Date.now())) {
+  if (puid && expiry) {
+    const elapsed = 180000 - (expiry - now); // how long since the PUID was created
+
+    // If minimum time (50s) hasn't passed, treat as early refresh
+    if (elapsed < 50000) {
+      completedUsers.delete(puid);
+      res.clearCookie("puid");
+      return renderGetKeyPage(res);
+    }
+
+    // If session is still valid and minimum time passed, show key
+    if (expiry > now) {
+      return renderKeyPage(res);
+    }
+
+    // Expired session
+    completedUsers.delete(puid);
     res.clearCookie("puid");
   }
 
-  // Show key if user has a valid session
-  if (puid && expiry && expiry > Date.now()) {
-    const dailyKey = getDailyKey();
-    return res.send(`
-      <html>
-        <head>
-          <title>Your Key</title>
-          <style>
-            body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
-            .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
-            h1 { color:#4dabf7; }
-            .key { font-size:28px; color:#0f0; margin-top:20px; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>🎉 Congrats!</h1>
-            <p>Your daily key is:</p>
-            <p class="key">${dailyKey}</p>
-          </div>
-        </body>
-      </html>
-    `);
+  // Default: show Get Key button
+  renderGetKeyPage(res);
+});
+
+// ===== Generate PUID and redirect to LootLabs =====
+app.get("/key", (req, res) => {
+  const existingPuid = req.cookies.puid;
+  const existingExpiry = completedUsers.get(existingPuid);
+
+  // If old PUID exists but less than 30s remaining, expire it
+  if (existingPuid && existingExpiry && existingExpiry - Date.now() > 150000) {
+    completedUsers.delete(existingPuid);
+    res.clearCookie("puid");
   }
 
-  // Otherwise, show Get Key button
+  // Create new PUID and 3 minute expiration
+  const puid = uuidv4();
+  const expiry = Date.now() + 180000; // 3 minutes
+  completedUsers.set(puid, expiry);
+
+  // Set cookie
+  res.cookie("puid", puid, { httpOnly: true, maxAge: 180000 });
+
+  // Redirect to LootLabs with user's unique PUID
+  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
+  res.redirect(lootlabsUrl);
+});
+
+// ===== Handle return from LootLabs =====
+app.get("/api/lootlabs", (req, res) => {
+  const puid = req.cookies.puid;
+
+  if (!puid || !completedUsers.has(puid)) {
+    return res.redirect("/"); // redirect to Get Key page if missing/expired
+  }
+
+  // Reset expiration to 3 minutes from now (in case user delayed)
+  completedUsers.set(puid, Date.now() + 180000);
+
+  // Stay on same page, show key dynamically
+  res.redirect("/");
+});
+
+// ===== Helper functions =====
+function renderGetKeyPage(res) {
   res.send(`
     <html>
       <head>
@@ -78,46 +113,31 @@ app.get("/", (req, res) => {
       </body>
     </html>
   `);
-});
+}
 
-// ===== Generate PUID and redirect to LootLabs =====
-app.get("/key", (req, res) => {
-  const existingPuid = req.cookies.puid;
-  const existingExpiry = completedUsers.get(existingPuid);
-
-  // If user already has a PUID and it's been less than 30 seconds, expire old one
-  if (existingPuid && existingExpiry && existingExpiry - Date.now() > 150000) {
-    completedUsers.delete(existingPuid);
-    res.clearCookie("puid");
-  }
-
-  // Create new PUID and 3 minute expiration
-  const puid = uuidv4();
-  const expiry = Date.now() + 180000; // 3 minutes
-  completedUsers.set(puid, expiry);
-
-  // Set cookie
-  res.cookie("puid", puid, { httpOnly: true, maxAge: 180000 });
-
-  // Redirect to LootLabs
-  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
-  res.redirect(lootlabsUrl);
-});
-
-// ===== Handle return from LootLabs =====
-app.get("/api/lootlabs", (req, res) => {
-  const puid = req.cookies.puid;
-
-  if (!puid || !completedUsers.has(puid)) {
-    return res.redirect("/"); // redirect to Get Key page if missing/expired
-  }
-
-  // Reset expiration to 3 minutes from now (in case user delayed)
-  completedUsers.set(puid, Date.now() + 180000);
-
-  // Stay on same page, show key dynamically
-  res.redirect("/");
-});
+function renderKeyPage(res) {
+  const dailyKey = getDailyKey();
+  res.send(`
+    <html>
+      <head>
+        <title>Your Key</title>
+        <style>
+          body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
+          .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
+          h1 { color:#4dabf7; }
+          .key { font-size:28px; color:#0f0; margin-top:20px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>🎉 Congrats!</h1>
+          <p>Your daily key is:</p>
+          <p class="key">${dailyKey}</p>
+        </div>
+      </body>
+    </html>
+  `);
+}
 
 // ===== Start server =====
 app.listen(PORT, () => {
