@@ -79,7 +79,7 @@ app.get("/", (req, res) => {
 // ===== Generate PUID and redirect to LootLabs =====
 app.get("/key", (req, res) => {
   const puid = uuidv4();
-  const expiry = Date.now() + 60000; // 1 minute in milliseconds
+  const expiry = Date.now() + 180000; // 3 minute in milliseconds
 
   // Store the PUID with expiry timestamp
   completedUsers.set(puid, expiry);
@@ -88,7 +88,7 @@ app.get("/key", (req, res) => {
   res.cookie("puid", puid, { httpOnly: true, maxAge: 60000 });
 
   // LootLabs link with puid
-  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
+  const lootlabsUrl = `https://lootdest.org/s?K3VfEVAX&puid=${puid}`;
   res.redirect(lootlabsUrl);
 });
 
