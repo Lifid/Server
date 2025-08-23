@@ -69,7 +69,7 @@ app.get("/redirect-to-lootlabs", (req, res) => {
   const { puid } = req.query;
   if (!puid || !completions.has(puid)) return res.status(400).send("Invalid puid");
 
-  const lootlabsLink = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
+  const lootlabsLink = `https://loot-link.com/s?eTuBnKHk&puid=${puid}`;
   res.redirect(lootlabsLink);
 });
 
