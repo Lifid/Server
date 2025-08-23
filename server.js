@@ -10,8 +10,8 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cookieParser());
 
-// In-memory store for completed PUIDs
-const completedUsers = new Set();
+// In-memory store for completed PUIDs with timestamp
+const completedUsers = new Map();
 
 // Load daily key
 function getDailyKey() {
@@ -49,7 +49,13 @@ app.get("/", (req, res) => {
 // ===== Generate PUID and redirect to LootLabs =====
 app.get("/key", (req, res) => {
   const puid = uuidv4();
-  res.cookie("puid", puid, { httpOnly: true });
+  const expiry = Date.now() + 60000; // 1 minute in milliseconds
+
+  // Store the PUID with expiry timestamp
+  completedUsers.set(puid, expiry);
+
+  // Set cookie for client
+  res.cookie("puid", puid, { httpOnly: true, maxAge: 60000 });
 
   // LootLabs link with puid
   const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
@@ -60,12 +66,12 @@ app.get("/key", (req, res) => {
 app.get("/api/lootlabs", (req, res) => {
   const puid = req.cookies.puid;
 
-  if (!puid) {
-    return res.status(400).send("⚠️ No session found. Please go through the Get Key button first.");
+  if (!puid || !completedUsers.has(puid)) {
+    return res.redirect("/"); // Redirect to get-key page if missing/expired
   }
 
-  // Mark user as completed
-  completedUsers.add(puid);
+  // Extend expiration to ensure user has short window to claim key
+  completedUsers.set(puid, Date.now() + 60000);
 
   // Redirect to success page
   res.redirect("/success");
@@ -74,8 +80,10 @@ app.get("/api/lootlabs", (req, res) => {
 // ===== Success page showing key =====
 app.get("/success", (req, res) => {
   const puid = req.cookies.puid;
+  const expiry = completedUsers.get(puid);
 
-  if (puid && completedUsers.has(puid)) {
+  // Check if PUID exists and is not expired
+  if (puid && expiry && expiry > Date.now()) {
     const dailyKey = getDailyKey();
     return res.send(`
       <html>
@@ -99,7 +107,11 @@ app.get("/success", (req, res) => {
     `);
   }
 
-  res.send("⚠️ Could not verify completion. Please go through the Get Key button again.");
+  // Remove expired/invalid PUID
+  if (puid) completedUsers.delete(puid);
+
+  // Redirect automatically to Get Key page
+  res.redirect("/");
 });
 
 // ===== Start server =====
