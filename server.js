@@ -7,50 +7,71 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cookieParser());
+// Debug toggle
+const DEBUG = true;
 
-// In-memory store: puid -> { createdAt, expiresAt, completed }
+// In-memory stores
+// puid -> { createdAt, expiresAt, completed, ip }
 const sessions = new Map();
+// ip -> puid (for fallback in private browsers)
+const ipIndex = new Map();
 
-// Load daily key
 function getDailyKey() {
   const data = fs.readFileSync(path.join(__dirname, "dailykey.json"), "utf8");
   return JSON.parse(data).key;
 }
 
+// Helper: client IP
+function getClientIp(req) {
+  return (
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket.remoteAddress
+  );
+}
+
 // ===== Landing / Get Key page =====
 app.get("/", (req, res) => {
   const puid = req.cookies.puid;
-  const session = puid ? sessions.get(puid) : null;
+  const ip = getClientIp(req);
   const now = Date.now();
+  let session = puid ? sessions.get(puid) : null;
+  let debugMessage = "";
 
-  if (session) {
-    // Already expired
-    if (now > session.expiresAt) {
-      sessions.delete(puid);
-      res.clearCookie("puid");
-      return renderGetKeyPage(res);
-    }
-
-    // If LootLabs not completed yet, show get key
-    if (!session.completed) {
-      return renderGetKeyPage(res);
-    }
-
-    // If completed but <47s wait -> block/glitch prevention
-    if (now - session.createdAt < 470000) {
-      sessions.delete(puid);
-      res.clearCookie("puid");
-      return renderGetKeyPage(res);
-    }
-
-    // If completed AND waited long enough -> show key
-    return renderKeyPage(res);
+  if (!session && ipIndex.has(ip)) {
+    session = sessions.get(ipIndex.get(ip));
   }
 
-  // Default: show Get Key
-  renderGetKeyPage(res);
+  if (session) {
+    if (now > session.expiresAt) {
+      sessions.delete(session.puid);
+      ipIndex.delete(session.ip);
+      res.clearCookie("puid");
+      session = null;
+    }
+  }
+
+  if (!session) {
+    if (DEBUG) debugMessage = "New user detected 01";
+    return renderGetKeyPage(res, debugMessage);
+  }
+
+  if (!session.completed) {
+    if (DEBUG) debugMessage = "Loot lab not complete, try again";
+    return renderGetKeyPage(res, debugMessage);
+  }
+
+  // Completed but too early
+  if (now - session.createdAt < 45000) {
+    if (DEBUG) debugMessage = "Glitch prevention: wait 45s";
+    sessions.delete(session.puid);
+    ipIndex.delete(session.ip);
+    res.clearCookie("puid");
+    return renderGetKeyPage(res, debugMessage);
+  }
+
+  // Success: show key, clear IP
+  ipIndex.delete(session.ip);
+  return renderKeyPage(res);
 });
 
 // ===== Generate PUID and redirect to LootLabs =====
@@ -58,7 +79,10 @@ app.get("/key", (req, res) => {
   const puid = uuidv4();
   const createdAt = Date.now();
   const expiresAt = createdAt + 180000; // 3 minutes
-  sessions.set(puid, { createdAt, expiresAt, completed: false });
+  const ip = getClientIp(req);
+
+  sessions.set(puid, { puid, createdAt, expiresAt, completed: false, ip });
+  ipIndex.set(ip, puid);
 
   res.cookie("puid", puid, { httpOnly: true, maxAge: 180000 });
 
@@ -69,23 +93,23 @@ app.get("/key", (req, res) => {
 // ===== Handle return from LootLabs =====
 app.get("/api/lootlabs", (req, res) => {
   const puid = req.cookies.puid;
-  const session = puid ? sessions.get(puid) : null;
+  const ip = getClientIp(req);
 
-  if (!session) {
-    return res.redirect("/");
+  let session = puid ? sessions.get(puid) : null;
+  if (!session && ipIndex.has(ip)) {
+    session = sessions.get(ipIndex.get(ip));
   }
 
-  // Mark session as completed
-  session.completed = true;
+  if (!session) return res.redirect("/");
 
-  // Keep same expiry (3 min total from creation)
-  sessions.set(puid, session);
+  session.completed = true;
+  sessions.set(session.puid, session);
 
   res.redirect("/");
 });
 
-// ===== Helpers =====
-function renderGetKeyPage(res) {
+// ===== Render pages =====
+function renderGetKeyPage(res, debugMessage = "") {
   res.send(`
     <html>
       <head>
@@ -96,6 +120,7 @@ function renderGetKeyPage(res) {
           h1 { color:#4dabf7; }
           button { padding:15px 30px; font-size:18px; border:none; border-radius:8px; background:#4dabf7; color:white; cursor:pointer; transition:0.3s; }
           button:hover { background:#339af0; }
+          .debug { margin-top:15px; color:#0f0; font-size:14px; }
         </style>
       </head>
       <body>
@@ -105,6 +130,7 @@ function renderGetKeyPage(res) {
           <form action="/key" method="get">
             <button type="submit">Go to LootLabs</button>
           </form>
+          ${DEBUG && debugMessage ? `<div class="debug">${debugMessage}</div>` : ""}
         </div>
       </body>
     </html>
