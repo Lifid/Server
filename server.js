@@ -1,167 +1,107 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
-const { v4: uuidv4 } = require("uuid");
-const fs = require("fs");
-const path = require("path");
-
 const app = express();
+
+app.use(cookieParser());
+app.use(express.urlencoded({ extended: true }));
+
 const PORT = process.env.PORT || 3000;
 
-// Debug toggle
-const DEBUG = true;
+// Debug flag
+const debugMode = true;
 
-// In-memory stores
-// puid -> { createdAt, expiresAt, completed, ip }
-const sessions = new Map();
-// ip -> puid (for fallback in private browsers)
-const ipIndex = new Map();
+// Store users by IP
+const users = {};
 
-function getDailyKey() {
-  const data = fs.readFileSync(path.join(__dirname, "dailykey.json"), "utf8");
-  return JSON.parse(data).key;
-}
-
-// Helper: client IP
-function getClientIp(req) {
+// Utility: get client IP
+function getIp(req) {
   return (
-    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.socket.remoteAddress
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.connection.remoteAddress ||
+    req.ip
   );
 }
 
-// ===== Landing / Get Key page =====
+// Utility: generate fake key (replace with your system)
+function getDailyKey() {
+  return "KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+}
+
+// Main page (Get Key / Show Key)
 app.get("/", (req, res) => {
-  const puid = req.cookies.puid;
-  const ip = getClientIp(req);
-  const now = Date.now();
-  let session = puid ? sessions.get(puid) : null;
-  let debugMessage = "";
+  const ip = getIp(req);
+  const user = users[ip];
 
-  if (!session && ipIndex.has(ip)) {
-    session = sessions.get(ipIndex.get(ip));
-  }
+  let debugMsg = "";
 
-  if (session) {
-    if (now > session.expiresAt) {
-      sessions.delete(session.puid);
-      ipIndex.delete(session.ip);
-      res.clearCookie("puid");
-      session = null;
+  if (debugMode) {
+    if (!user) {
+      debugMsg = `<p style="color:green;">New user detected 01</p>`;
+    } else if (!user.completed && Date.now() - user.startTime < 45000) {
+      debugMsg = `<p style="color:red;">Loot lab not complete, try again</p>`;
     }
   }
 
-  if (!session) {
-    if (DEBUG) debugMessage = "New user detected 01";
-    return renderGetKeyPage(res, debugMessage);
-  }
+  // If user has completed and not expired
+  if (user && user.completed && Date.now() < user.expireTime) {
+    const key = getDailyKey();
 
-  if (!session.completed) {
-    if (DEBUG) debugMessage = "Loot lab not complete, try again";
-    return renderGetKeyPage(res, debugMessage);
-  }
+    // Clear IP so they must do it again next time
+    delete users[ip];
 
-  // Completed but too early
-  if (now - session.createdAt < 45000) {
-    if (DEBUG) debugMessage = "Glitch prevention: wait 45s";
-    sessions.delete(session.puid);
-    ipIndex.delete(session.ip);
-    res.clearCookie("puid");
-    return renderGetKeyPage(res, debugMessage);
+    res.send(`
+      <h1>Your Key</h1>
+      <p>${key}</p>
+      ${debugMsg}
+    `);
+  } else {
+    res.send(`
+      <h1>Get Key</h1>
+      <form action="/get-key" method="post">
+        <button type="submit">Get Key</button>
+      </form>
+      ${debugMsg}
+    `);
   }
-
-  // Success: show key, clear IP
-  ipIndex.delete(session.ip);
-  return renderKeyPage(res);
 });
 
-// ===== Generate PUID and redirect to LootLabs =====
-app.get("/key", (req, res) => {
-  const puid = uuidv4();
-  const createdAt = Date.now();
-  const expiresAt = createdAt + 180000; // 3 minutes
-  const ip = getClientIp(req);
+// Handle "Get Key" button click → redirect to LootLabs
+app.post("/get-key", (req, res) => {
+  const ip = getIp(req);
 
-  sessions.set(puid, { puid, createdAt, expiresAt, completed: false, ip });
-  ipIndex.set(ip, puid);
+  // Reset old data if exists
+  users[ip] = {
+    startTime: Date.now(),
+    completed: false,
+    expireTime: null,
+  };
 
-  res.cookie("puid", puid, { httpOnly: true, maxAge: 180000 });
-
-  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${puid}`;
-  res.redirect(lootlabsUrl);
+  // Redirect to LootLabs with IP tracking
+  res.redirect(
+    `https://loot-link.com/s?BYbSlUsE&puid=${ip}`
+  );
 });
 
-// ===== Handle return from LootLabs =====
+// Callback from LootLabs
 app.get("/api/lootlabs", (req, res) => {
-  const puid = req.cookies.puid;
-  const ip = getClientIp(req);
-
-  let session = puid ? sessions.get(puid) : null;
-  if (!session && ipIndex.has(ip)) {
-    session = sessions.get(ipIndex.get(ip));
+  const ip = req.query.ip;
+  if (!ip) {
+    return res.send("Missing IP");
   }
 
-  if (!session) return res.redirect("/");
+  const user = users[ip];
+  if (!user) {
+    return res.send("Unknown user (no record)");
+  }
 
-  session.completed = true;
-  sessions.set(session.puid, session);
+  // Mark as completed and set 3 min expiry
+  user.completed = true;
+  user.expireTime = Date.now() + 3 * 60 * 1000;
 
   res.redirect("/");
 });
 
-// ===== Render pages =====
-function renderGetKeyPage(res, debugMessage = "") {
-  res.send(`
-    <html>
-      <head>
-        <title>Get Key</title>
-        <style>
-          body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
-          .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
-          h1 { color:#4dabf7; }
-          button { padding:15px 30px; font-size:18px; border:none; border-radius:8px; background:#4dabf7; color:white; cursor:pointer; transition:0.3s; }
-          button:hover { background:#339af0; }
-          .debug { margin-top:15px; color:#0f0; font-size:14px; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>🔑 Get Daily Key</h1>
-          <p>Click below to complete LootLabs:</p>
-          <form action="/key" method="get">
-            <button type="submit">Go to LootLabs</button>
-          </form>
-          ${DEBUG && debugMessage ? `<div class="debug">${debugMessage}</div>` : ""}
-        </div>
-      </body>
-    </html>
-  `);
-}
-
-function renderKeyPage(res) {
-  const dailyKey = getDailyKey();
-  res.send(`
-    <html>
-      <head>
-        <title>Your Key</title>
-        <style>
-          body { background:#1e1e1e; color:#e0e0e0; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
-          .card { background:#2a2a2a; padding:40px; border-radius:12px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.5);}
-          h1 { color:#4dabf7; }
-          .key { font-size:28px; color:#0f0; margin-top:20px; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>🎉 Congrats!</h1>
-          <p>Your daily key is:</p>
-          <p class="key">${dailyKey}</p>
-        </div>
-      </body>
-    </html>
-  `);
-}
-
-// ===== Start server =====
+// Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
