@@ -189,7 +189,7 @@ app.get("/key", (req, res) => {
   });
 
   // Your LootLabs link; keep the puid if LootLabs prefers it, but our logic uses IP on return
-  const lootlabsUrl = `https://loot-link.com/s?BYbSlUsE&puid=${encodeURIComponent(ip)}`;
+  const lootlabsUrl = "https://loot-link.com/s?BYbSlUsE";
   return res.redirect(lootlabsUrl);
 });
 
